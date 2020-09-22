@@ -1,3 +1,5 @@
+#https://github.com/schaugf/HEnorm_python
+
 import argparse
 import numpy as np
 from PIL import Image
