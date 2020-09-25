@@ -23,19 +23,19 @@ class Deconvolute:
     """
     Class to carry out colour deconvolution of a RGB image
     """
-    def get_OD_vector(a):
+    def get_OD_vector(self, rgb):
         """
         Function that takes RGB values as a list.
         Returns normalised OD vector.
         """
-        a = np.array([a], dtype=np.uint8)
-        a_float = sk.img_as_float(a)
-        OD = -np.log10(a_float)
+        rgb = np.array([rgb], dtype=np.uint8)
+        rgb_float = sk.img_as_float(rgb)
+        OD = -np.log10(rgb_float)
         normalised_OD = OD / np.sqrt(np.sum(OD**2))
         OD_vector = np.around(normalised_OD, decimals=3)
         return OD_vector[0]
 
-    def deconvolute_hdr(slide):
+    def deconvolute_hdr(self, slide):
         """ Function that takes a hdr image
         and performs stain separation"""
         # Normalised OD vector matrix:   R      G      B
@@ -73,23 +73,55 @@ class Red_stain_channel:
         filled = morphology.reconstruction(seed, mask, method='erosion')
         return filled
     
-    def red_mask(self, filled, red_small_objects=100):
+    def red_mask(self, filled, threshold='otsu', red_small_objects=100):
         #3. Threshold for red stain channel
-        red_threshold = filters.threshold_otsu(filled)
-        red_mask = filled > red_threshold
-    
+        if threshold == 'otsu':
+            otsu_threshold = filters.threshold_otsu(filled)
+            red_mask = filled > otsu_threshold
+        else:
+            mean_threshold = filters.threshold_mean(filled)
+            red_mask = filled > mean_threshold
         #4. remove small objects - clean up mask (default value for min_size is 64)
         red_mask_rm = morphology.remove_small_objects(red_mask, min_size=red_small_objects)
         return red_mask_rm
     
     
+class Nuclei_channel:
+    """
+    Class for processing the haematoxylin channel - nuclei
+    """
+    
+    def __init__(self, nuclei_channel):
+        self.nuclei = nuclei_channel
+    
+    def smooth_nuclei(self, image, nuclei_filter='median', nuclei_filter_size=3, nuclei_filter_sigma=1):
+        # 1. Smoothing filter for haematoxylin channel
+        if nuclei_filter == 'gaussian':
+            nuclei_smooth = ndi.gaussian_filter(util.img_as_float(image), sigma=nuclei_filter_sigma)
+        else:
+            nuclei_smooth = ndi.median_filter(util.img_as_float(image), size=nuclei_filter_size)
+        return nuclei_smooth
+    
+    def nuclei_mask(self, nuclei_smooth, nuclei_small_objects=100):
+        #2. Threshold for haematoxylin channel
+        nuclei_threshold = filters.threshold_otsu(nuclei_smooth)
+        nuclei_mask = nuclei_smooth > nuclei_threshold
+    
+        #3. remove small objects - clean up mask. Default for min_size in skimage is 64.
+        nuclei_mask_rm = morphology.remove_small_objects(nuclei_mask, min_size=nuclei_small_objects)
+        #4. fill in holes
+        nuclei_mask_fill = ndi.morphology.binary_fill_holes(nuclei_mask_rm)
+        #5. binary opening
+        nuclei_mask_open = morphology.binary_opening(nuclei_mask_fill)
+        return nuclei_mask_open
+
 class Segment:
     """
     Class for image segmentation using the watershed algorithm
     """
      
     # Distance transform of binary image (mask) and markers for watershed segmentation
-    def markers_red(self, mask, peak_min_distance=15):
+    def markers(self, mask, peak_min_distance=15):
         distance = ndi.distance_transform_edt(mask) 
         local_peak = feature.peak_local_max(distance, min_distance=peak_min_distance, indices=False)
         markers_peak = ndi.label(local_peak)[0]
@@ -110,6 +142,12 @@ class Segment:
         gradient = filters.rank.gradient(util.img_as_ubyte(image), morphology.disk(2))
         labels_gradient = segmentation.watershed(gradient, markers_peak, mask=mask, connectivity=2)
         return labels_gradient
+    
+    # For segmentation using nuclei of red stained cells
+    def red_nuclei(self, red_mask, nuclei_mask, red_nuclei_min_size=100):
+        red_nuclei = red_mask & nuclei_mask
+        red_nuclei_rm = morphology.remove_small_objects(red_nuclei, min_size = red_nuclei_min_size)
+        return  red_nuclei_rm
 
 
 class Count_cells:
@@ -119,12 +157,14 @@ class Count_cells:
     annotated ground truth.
     
     Initialise class with labels (output) from watershed segmentation.
-    Ground truth default is none. 
-    If ground truth available, it is initialised as a numpy array of the x,y coordinates of the centre of positive cells. 
+    Ground truth default is None. 
+    
+    If ground truth available, it is initialised as a numpy array of the (x, y) coordinates of the centre of positive cells.
+    (Typically annotations are done using QuPath counting function and (x, y) coordinates exported)
     """
     
     def __init__(self, labels, ground_truth=None):
-        self.labels = labels
+        self.labels = labels # output of watershed segmentation
         self.ground_truth = ground_truth
         
     def count_regions(self):
@@ -152,10 +192,10 @@ class Count_cells:
     def distance(x1, x2, y1, y2):
         return math.sqrt((x1 - x2)**2 + (y1 - y2)**2) # euclidean distance
     
-    def merge_centroids(self, centroids_array):
+    def merge_centroids(self, max_dist, centroids_array):
         # reduce over-segmentation by keeping only one of a pair of centroids that mark the same cell or nucleus
         # return final set of centroids marking each cell/nucleus as well as the final count for number of cells
-        num = 25 #within 25 pixels distance - set distance for merging pairs of centroids
+        num = max_dist #within max_dist (e.g. 25) pixels distance - set max distance for merging pairs of centroids
         still_to_merge = 1000
         while still_to_merge !=0 :
             dist_centroids = []
@@ -202,21 +242,45 @@ class Count_cells:
                 distances.append(row)
         return distances
     
-    def matches(self, distances):
-        # Centroids within 25 pixels of ground truth x,y coordinate taken as a match - True Positive  
+    def matches(self, distances, max_dist):
+        # A centroid within max_dist pixels (set to 25 or 35) of a ground truth (x, y) coordinate taken as a match - True Positive   
         df = np.array(distances)
-        df_match = pd.DataFrame({'Centroid x': df[:, 0], 'Centroid y': df[:, 1], 'Count x': df[:, 2], 'Count y': df[:, 3], 'Distance': df[:, 4]})
+        df_match = pd.DataFrame({'Centroid x': df[:, 0], 'Centroid y': df[:, 1], 'Coord x': df[:, 2],
+                                 'Coord y': df[:, 3], 'Distance': df[:, 4]})
         df_ordered = df_match.sort_values(by=['Distance'])
-        df_min_dist = df_ordered[df_ordered.Distance <= 25] 
-        # Code to check true positives - remove duplicated centroids or coords. Ordered list, so just check rest of list as go through row by row
-        matches = df_min_dist.to_numpy()
-        return matches
+        df_min_dist = df_ordered[df_ordered.Distance <= max_dist] # set the max distance for true positive matches
+        
+        # from ordered array (smallest to largest distance), for a match, remove rows below that contain
+        # the centroid or (x, y) coordinate that has already been matched
+        matches_array = df_min_dist.to_numpy()
+        matches_array = np.round(matches_array, decimals=5)
+        matches = matches_array.tolist()
+        
+        remove = []
+        for i in range(len(matches)):
+            row = matches[i]
+            if (i+1) < len(matches): # exit once reach end of array
+                for j in range((i+1), len(matches)): # check rest of array to find rows to remove
+                    if ((matches[j][0] == row[0] and matches[j][1] == row[1])
+                        or (matches[j][2] == row[2] and matches[j][3] == row[3])):
+                        remove.append(matches[j])
+
+        # remove already matched pairs
+        final_matches = []
+        for pairs in matches:
+            if pairs not in remove:
+                final_matches.append(pairs)
+        
+        final_matches = np.array(final_matches)
+        return final_matches
     
     # lists of true positives, false positives and false negatives 
-    # based on matches bewteen centroids and ground truth x,y
-    def missed(self, matches, centroids_array):
+    # based on matches bewteen centroids and ground truth (x, y) coordinates
+    def fp_fn_tp(self, centroids_array, matches):
+        centroids_array = np.round(centroids_array, decimals=5)
         centroids = centroids_array.tolist() #final list of centroids of cells after merging
-        ground_truth = self.ground_truth.tolist() #list of ground truth x,y coordinates
+        gt_array = np.round(self.ground_truth, decimals=5)
+        ground_truth = gt_array.tolist() #list of ground truth x,y coordinates
         true_positives = (matches[:, :2]).tolist() #list of centroids that match the ground truth
         x_y_matches = (matches[:, 2:4]).tolist() #list of ground truth x,y values that have centroid matches
         
