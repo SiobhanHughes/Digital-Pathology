@@ -192,7 +192,7 @@ class Count_cells:
     def distance(x1, x2, y1, y2):
         return math.sqrt((x1 - x2)**2 + (y1 - y2)**2) # euclidean distance
     
-    def merge_centroids(self, max_dist, centroids_array):
+    def merge_centroids(self, centroids_array, max_dist=25):
         # reduce over-segmentation by keeping only one of a pair of centroids that mark the same cell or nucleus
         # return final set of centroids marking each cell/nucleus as well as the final count for number of cells
         num = max_dist #within max_dist (e.g. 25) pixels distance - set max distance for merging pairs of centroids
@@ -237,13 +237,15 @@ class Count_cells:
         distances = [] #distance from each centroid to each x,y point of ground truth
         for i in range(len(centroids_array)):
             for j in range(len(self.ground_truth)):
-                dist = self.distance(centroids_array[i][0], self.ground_truth[j][0],  centroids_array[i][1], self.ground_truth[j][1])
+                dist = self.distance(centroids_array[i][0], self.ground_truth[j][0],
+                                     centroids_array[i][1], self.ground_truth[j][1])
                 row = [centroids_array[i][0], centroids_array[i][1], self.ground_truth[j][0], self.ground_truth[j][1], dist]
                 distances.append(row)
         return distances
     
-    def matches(self, distances, max_dist):
-        # A centroid within max_dist pixels (set to 25 or 35) of a ground truth (x, y) coordinate taken as a match - True Positive   
+    def matches(self, distances, max_dist=25):
+        # A centroid within max_dist pixels (set to 25 or 35) of a ground truth (x, y) coordinate taken as a match 
+        # - True Positive   
         df = np.array(distances)
         df_match = pd.DataFrame({'Centroid x': df[:, 0], 'Centroid y': df[:, 1], 'Coord x': df[:, 2],
                                  'Coord y': df[:, 3], 'Distance': df[:, 4]})
@@ -302,6 +304,9 @@ class Count_cells:
         false_pos = len(false_positives)
         false_neg = len(false_negatives)
         precision = true_pos/(true_pos + false_pos)
+        precision = round(precision, 2)
         recall = true_pos/(true_pos + false_neg)
+        recall = round(recall, 2)
         f1 = 2* ((precision * recall)/(precision + recall))
+        f1 = round(f1, 2)
         return true_pos, false_pos, false_neg, precision, recall, f1
