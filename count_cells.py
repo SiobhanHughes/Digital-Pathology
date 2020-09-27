@@ -59,6 +59,7 @@ class Red_stain_channel:
     
     def smooth_red(self, image, red_filter='median', red_filter_size=3, red_filter_sigma=1):
         # 1. Smoothing filter for red stain channel
+        # image can be red_smooth or filled
         if red_filter == 'gaussian':
             red_smooth = ndi.gaussian_filter(util.img_as_float(image), sigma=red_filter_sigma)
         else:
