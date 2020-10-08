@@ -311,3 +311,139 @@ class Count_cells:
         f1 = 2* ((precision * recall)/(precision + recall))
         f1 = round(f1, 2)
         return true_pos, false_pos, false_neg, precision, recall, f1
+
+
+""" 
+USER INSTRUCTIONS
+
+Dependencies
+
+Python 		        3.7.7
+scikit-image  		0.16.2
+numpy         		1.18.5
+scipy         		1.5.2
+matplotlib    		3.2.2
+pandas        		1.1.0 
+
+
+The following method calls are used to generate data and cell counts for each pipeline.
+
+Pipeline 1
+
+1. Colour deconvolution:
+•	Input is an image tile (slide) 
+•	Create an object of class Deconvolute and call method to deconvolute a hdr image:
+o	deconv = Deconvolute()
+o	deconvoluted = deconv.deconvolute_hdr(slide)
+•	Red stain channel of deconvoluted image:
+o	red = deconvoluted[:, :, 2]
+
+
+2. Process the red stain channel:
+•	Create an object of class Red_stain_channel and initiate it with the deconvoluted grayscale image of the red stain channel:
+o	red_stain = Red_stain_channel(red)
+•	Smoothing filter:
+o	red_smooth = red_stain.smooth_red(red, red_filter='median', red_filter_size=3)
+•	Fill in nuclei (holes) in the red stain channel – morphological reconstruction by erosion:
+o	filled = red_stain.fill_nuclei(red_smooth)
+•	Binary mask of the red stain channel obtained using Otsu threshold method:
+o	red_mask = red_stain.red_mask(filled, threshold='otsu', red_small_objects=200)
+
+
+3. Watershed segmentation:
+•	Create an object of class Segment:
+o	WS = Segment()
+•	Distance transform of the binary mask of the red stain channel and markers for watershed algorithm using the peak_local_max method:
+o	markers, distance = WS.markers(red_mask, peak_min_distance=25)
+•	Watershed segmentation using the denoised red stain channel as the input image together with the markers and binary mask of the red stain channel:
+o	labels = WS.segment_red(red_smooth, markers, red_mask)
+
+
+4. Count macrophages:
+•	Create an object of class Count_cells and initialise it with the results of watershed segmentation (labels). Initialise with ground truth cell count if available, otherwise, the default for ground_truth is set as None:
+o	count_cells = Count_cells(labels, ground_truth = ground_truth)
+•	Get the starting centroids list of segmented regions:
+o	centroids_start = count_cells.get_centroids()
+o	If count of initial centroids list is required, the following options can be used:
+	initial_count = len(centroids_start)
+	initial_count = count_cells. count_regions()
+•	Get the final centroids list and macrophage cell count:
+o	centroids, count = count_cells.merge_centroids(centroids_start, max_dist=35)
+•	If ground truth is available, benchmarking is done as follows:
+o	Distances between centroids and (x, y) ground truth coordinates:
+	distances = count_cells.distance_to_ground_truth(centroids)
+o	Matches – centroids and (x, y) ground truth coordinates that are within max_dist of one another:
+	matches = count_cells.matches(distances, max_dist=35)
+o	List of false positives, false negatives and true positives:
+	fp_list, fn_list, tp_list = count_cells.fp_fn_tp(centroids, matches)
+o	Metrics – Numbers of true positives, false positives and false negatives. Precision, recall and F1 score:
+	TP, FP, FN, precision, recall, f1 = count_cells.f1(fp_list, fn_list, tp_list)
+
+
+
+ 
+Pipeline 2
+
+1. Colour deconvolution:
+•	Input is an image tile (slide) 
+•	Create an object of class Deconvolute and call method to deconvolute a hdr image:
+o	deconv = Deconvolute()
+o	deconvoluted = deconv.deconvolute_hdr(slide)
+•	Red stain channel of deconvoluted image:
+o	red = deconvoluted[:, :, 2]
+•	Haematoxylin channel of deconvoluted image:
+o	nuclei = deconvoluted[:, :, 0]
+
+
+2. Process the red stain channel:
+•	Create an object of class Red_stain_channel and initiate it with the deconvoluted grayscale image of the red stain channel:
+o	red_stain = Red_stain_channel(red)
+•	Smoothing filter:
+o	red_smooth = red_stain.smooth_red(red, red_filter='gaussian', red_filter_sigma=1)
+•	Fill in nuclei (holes) in the red stain channel – morphological reconstruction by erosion:
+o	filled = red_stain.fill_nuclei(red_smooth)
+•	Binary mask of the red stain channel obtained using mean threshold method:
+o	red_mask = red_stain.red_mask(filled, threshold='mean', red_small_objects=100)
+
+
+3. Process the haematoxylin channel:
+•	Create and object of class Nuclei_channel and initiate it with the deconvoluted grayscale image of the haematoxylin channel::
+o	nuclei = Nuclei_channel(nuclei)
+•	Smoothing filter:
+o	nuclei_smooth = nuclei.smooth_nuclei(nuclei, nuclei_filter='gaussian', nuclei_filter_sigma=1)
+•	Binary mask of the haematoxylin channel obtained using Otsu threshold method:
+o	nuclei_mask = nuclei.nuclei_mask(nuclei_smooth, nuclei_small_objects=100)
+
+
+4. Watershed segmentation:
+•	Create an object of class Segment:
+o	WS = Segment()
+•	Red nuclei mask:
+o	red_nuclei = WS.red_nuclei(red_mask, nuclei_mask, red_nuclei_min_size=150)
+•	Distance transform of the red_nuclei binary mask and markers for watershed algorithm using the peak_local_max method:
+o	markers, distance = WS.markers(red_nuclei, peak_min_distance=20)
+•	Watershed segmentation using the denoised red stain channel as the input image together with the markers and red_nuclei binary mask:
+o	labels = WS.segment_red(red_smooth, markers, red_nuclei)
+
+5. Count macrophages:
+•	Create an object of class Count_cells and initialise it with the results of watershed segmentation (labels). Initialise with ground truth cell count if available, otherwise, the default for ground_truth is set as None:
+o	count_cells = Count_cells(labels, ground_truth = ground_truth)
+•	Get the starting centroids list of segmented regions:
+o	centroids_start = count_cells.get_centroids()
+o	If count of initial centroids list is required, the following options can be used:
+	initial_count = len(centroids_start)
+	initial_count = count_cells. count_regions()
+•	Get the final centroids list and macrophage cell count:
+o	centroids, count = count_cells.merge_centroids(centroids_start, max_dist=35)
+•	If ground truth is available, benchmarking is done as follows:
+o	Distances between centroids and (x, y) ground truth coordinates:
+	distances = count_cells.distance_to_ground_truth(centroids)
+o	Matches – centroids and (x, y) ground truth coordinates that are within max_dist of one another:
+	matches = count_cells.matches(distances, max_dist=35)
+o	List of false positives, false negatives and true positives:
+	fp_list, fn_list, tp_list = count_cells.fp_fn_tp(centroids, matches)
+o	Metrics – Numbers of true positives, false positives and false negatives. Precision, recall and F1 score:
+	TP, FP, FN, precision, recall, f1 = count_cells.f1(fp_list, fn_list, tp_list)
+
+
+"""

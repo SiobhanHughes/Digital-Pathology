@@ -64,7 +64,7 @@ def normalizeStaining(img, saveFile=None, Io=240, alpha=1, beta=0.15):
     
     #eigvecs *= -1
     
-    #project on the plane spanned by the eigenvectors corresponding to the two 
+    # project on the plane spanned by the eigenvectors corresponding to the two 
     # largest eigenvalues    
     That = ODhat.dot(eigvecs[:,1:3])
     
@@ -76,7 +76,7 @@ def normalizeStaining(img, saveFile=None, Io=240, alpha=1, beta=0.15):
     vMin = eigvecs[:,1:3].dot(np.array([(np.cos(minPhi), np.sin(minPhi))]).T)
     vMax = eigvecs[:,1:3].dot(np.array([(np.cos(maxPhi), np.sin(maxPhi))]).T)
     
-    #project on the plane spanned by the eigenvectors corresponding to the smallest 
+    # project on the plane spanned by the eigenvectors corresponding to the smallest 
     # and largest eigenvalues (determine thrid OD vector - residual)
     That2 = ODhat.dot(eigvecs[:,(0,2)])
 
@@ -103,6 +103,7 @@ def normalizeStaining(img, saveFile=None, Io=240, alpha=1, beta=0.15):
     else:
         H = vMax2[:,0]
         print(H)
+        
     # Use the G channel to assign the red stain [1]
     if (vMin[1] > vMax[1]) and (vMin[1] > vMin2[1]) and (vMin[1] > vMax2[1]):
         R = vMin[:,0]
@@ -116,6 +117,7 @@ def normalizeStaining(img, saveFile=None, Io=240, alpha=1, beta=0.15):
     else:
         R = vMax2[:,0]
         print(R)
+        
     # Use the B channel to assign DAB [2]
     if (vMin[2] > vMax[2]) and (vMin[2] > vMin2[2]) and (vMin[2] > vMax2[2]):
         D = vMin[:,0]
